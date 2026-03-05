@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Staff Badge Detection</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: #1a1a1a;
+            color: #ffffff;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        #videoContainer {
+            flex: 1;
+            position: relative;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #videoFeed {
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+            display: block;
+        }
+
+        #statsOverlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+            z-index: 10;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 16px;
+        }
+
+        .stat-label {
+            font-weight: 600;
+            opacity: 0.8;
+        }
+
+        .stat-value {
+            font-weight: 700;
+            font-size: 18px;
+        }
+
+        .violation-alert {
+            background: #ff3b3b;
+            color: white;
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 10px;
+            font-weight: 700;
+            text-align: center;
+            animation: pulse 1s infinite;
+            font-size: 18px;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        #statusBar {
+            background: #2a2a2a;
+            padding: 12px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top: 1px solid #3a3a3a;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #666;
+        }
+
+        .status-dot.connected {
+            background: #4ade80;
+            box-shadow: 0 0 10px #4ade80;
+        }
+
+        .status-dot.disconnected {
+            background: #ef4444;
+        }
+
+        .fps-counter {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            opacity: 0.8;
+        }
+
+        #startButton {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 20px 40px;
+            font-size: 20px;
+            font-weight: 700;
+            background: #4ade80;
+            color: #000;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            z-index: 100;
+            box-shadow: 0 4px 20px rgba(74, 222, 128, 0.4);
+        }
+
+        #startButton:active {
+            transform: translate(-50%, -50%) scale(0.95);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        #connectionError {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            padding: 20px;
+            z-index: 50;
+        }
+
+        #connectionError h2 {
+            color: #ef4444;
+            margin-bottom: 10px;
+        }
+
+        #connectionError p {
+            opacity: 0.7;
+            margin-bottom: 15px;
+        }
+
+        #retryButton {
+            padding: 12px 30px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="videoContainer">
+            <button id="startButton">Start Camera</button>
+            <img id="videoFeed" class="hidden" alt="Video Feed">
+            <div id="connectionError" class="hidden">
+                <h2>Connection Lost</h2>
+                <p>Attempting to reconnect...</p>
+                <button id="retryButton">Retry Now</button>
+            </div>
+
+            <div id="statsOverlay" class="hidden">
+                <div class="stat-row">
+                    <span class="stat-label">Persons:</span>
+                    <span class="stat-value" id="personsCount">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Staff:</span>
+                    <span class="stat-value" id="staffCount">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Process Time:</span>
+                    <span class="stat-value" id="processTime">0ms</span>
+                </div>
+                <div id="violationAlert" class="hidden violation-alert">
+                    ⚠️ BADGE VIOLATION DETECTED
+                    <div id="violationDetails" style="font-size: 14px; margin-top: 5px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="statusBar">
+            <div class="status-indicator">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Disconnected</span>
+            </div>
+            <div class="fps-counter">
+                <span id="fpsCounter">0 FPS</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden canvas for frame capture -->
+    <canvas id="canvas" style="display: none;"></canvas>
+
+    <script>
+        // Configuration
+        const TARGET_FPS = 15;
+        const FRAME_INTERVAL = 1000 / TARGET_FPS;
+        const CANVAS_WIDTH = 640;
+        const CANVAS_HEIGHT = 480;
+
+        // Get WebSocket URL (use current host, wss:// for HTTPS, ws:// for HTTP)
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const WS_URL = `${wsProtocol}//${window.location.hostname}:8000/ws`;
+
+        // DOM Elements
+        const startButton = document.getElementById('startButton');
+        const videoFeed = document.getElementById('videoFeed');
+        const statsOverlay = document.getElementById('statsOverlay');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const fpsCounter = document.getElementById('fpsCounter');
+        const personsCount = document.getElementById('personsCount');
+        const staffCount = document.getElementById('staffCount');
+        const processTime = document.getElementById('processTime');
+        const violationAlert = document.getElementById('violationAlert');
+        const violationDetails = document.getElementById('violationDetails');
+        const connectionError = document.getElementById('connectionError');
+        const retryButton = document.getElementById('retryButton');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // State
+        let stream = null;
+        let ws = null;
+        let isStreaming = false;
+        let frameCount = 0;
+        let lastFpsUpdate = Date.now();
+        let currentFps = 0;
+        let reconnectAttempts = 0;
+        let reconnectTimer = null;
+
+        // Initialize canvas size
+        canvas.width = CANVAS_WIDTH;
+        canvas.height = CANVAS_HEIGHT;
+
+        // Start camera when button clicked
+        startButton.addEventListener('click', async () => {
+            try {
+                // Check if mediaDevices is available
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    alert('Camera API not available. Please use HTTPS or localhost.');
+                    return;
+                }
+
+                // Request rear camera access (try environment first, fallback to user)
+                let constraints = {
+                    video: {
+                        facingMode: 'environment', // Rear camera
+                        width: { ideal: CANVAS_WIDTH },
+                        height: { ideal: CANVAS_HEIGHT }
+                    }
+                };
+
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia(constraints);
+                } catch (err) {
+                    // Fallback: try front camera if rear fails
+                    console.log('Rear camera failed, trying front camera...');
+                    constraints.video.facingMode = 'user';
+                    stream = await navigator.mediaDevices.getUserMedia(constraints);
+                }
+
+                // Create video element for capturing frames
+                const video = document.createElement('video');
+                video.srcObject = stream;
+                video.setAttribute('playsinline', ''); // Important for iOS
+                video.play();
+
+                // Wait for video to be ready
+                await new Promise(resolve => {
+                    video.onloadedmetadata = resolve;
+                });
+
+                // Hide start button, show feed
+                startButton.classList.add('hidden');
+                videoFeed.classList.remove('hidden');
+                statsOverlay.classList.remove('hidden');
+
+                alert('Camera started! Connecting WebSocket...'); // Debug
+
+                // Connect WebSocket
+                connectWebSocket();
+
+                // Start capturing and sending frames
+                startFrameCapture(video);
+
+            } catch (error) {
+                let errorMsg = 'Camera access failed!\n\n';
+
+                if (error.name === 'NotAllowedError') {
+                    errorMsg += 'Permission denied. Please:\n';
+                    errorMsg += '• Allow camera access in browser settings\n';
+                    errorMsg += '• Refresh the page and try again\n';
+                    errorMsg += '• iOS: Settings → Safari → Camera → Allow';
+                } else if (error.name === 'NotFoundError') {
+                    errorMsg += 'No camera found on this device.';
+                } else if (error.name === 'NotReadableError') {
+                    errorMsg += 'Camera is already in use by another app.';
+                } else {
+                    errorMsg += 'Error: ' + error.message + '\n\n';
+                    errorMsg += 'Try using HTTPS or check browser compatibility.';
+                }
+
+                alert(errorMsg);
+                console.error('Camera error:', error);
+            }
+        });
+
+        function connectWebSocket() {
+            console.log('Connecting to:', WS_URL);
+            ws = new WebSocket(WS_URL);
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = () => {
+                console.log('WebSocket connected to:', WS_URL);
+                alert('WebSocket connected!'); // Debug
+                updateStatus(true);
+                connectionError.classList.add('hidden');
+                reconnectAttempts = 0;
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    if (data.error) {
+                        console.error('Server error:', data.error);
+                        return;
+                    }
+
+                    // Update video feed with annotated frame
+                    videoFeed.src = 'data:image/jpeg;base64,' + data.frame;
+
+                    // Update stats
+                    if (data.stats) {
+                        updateStats(data.stats);
+                    }
+
+                    // Update FPS counter
+                    frameCount++;
+                    const now = Date.now();
+                    if (now - lastFpsUpdate >= 1000) {
+                        currentFps = frameCount;
+                        fpsCounter.textContent = `${currentFps} FPS`;
+                        frameCount = 0;
+                        lastFpsUpdate = now;
+                    }
+
+                } catch (error) {
+                    console.error('Error processing message:', error);
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                alert('WebSocket error! Check console.'); // Debug
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket closed');
+                updateStatus(false);
+
+                // Attempt reconnection
+                if (isStreaming) {
+                    reconnectAttempts++;
+                    connectionError.classList.remove('hidden');
+                    const delay = Math.min(5000, 1000 * reconnectAttempts);
+                    console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts})...`);
+
+                    reconnectTimer = setTimeout(() => {
+                        connectWebSocket();
+                    }, delay);
+                }
+            };
+        }
+
+        function startFrameCapture(video) {
+            isStreaming = true;
+            let lastCapture = 0;
+
+            function captureFrame() {
+                if (!isStreaming) return;
+
+                const now = Date.now();
+                if (now - lastCapture >= FRAME_INTERVAL) {
+                    lastCapture = now;
+
+                    // Draw video frame to canvas
+                    ctx.drawImage(video, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+                    // Convert to JPEG blob and send via WebSocket
+                    canvas.toBlob((blob) => {
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            blob.arrayBuffer().then(buffer => {
+                                ws.send(buffer);
+                            });
+                        }
+                    }, 'image/jpeg', 0.85);
+                }
+
+                requestAnimationFrame(captureFrame);
+            }
+
+            captureFrame();
+        }
+
+        function updateStats(stats) {
+            personsCount.textContent = stats.persons_count || 0;
+            staffCount.textContent = stats.staff_count || 0;
+            processTime.textContent = `${stats.process_time_ms || 0}ms`;
+
+            // Show violation alert if violations detected
+            if (stats.violations_count > 0) {
+                violationAlert.classList.remove('hidden');
+
+                // Show violation details
+                const violations = stats.violations || [];
+                const details = violations.map(v =>
+                    `${v.name}: ${v.reason}`
+                ).join(', ');
+                violationDetails.textContent = details;
+            } else {
+                violationAlert.classList.add('hidden');
+            }
+        }
+
+        function updateStatus(connected) {
+            if (connected) {
+                statusDot.classList.add('connected');
+                statusDot.classList.remove('disconnected');
+                statusText.textContent = 'Connected';
+            } else {
+                statusDot.classList.remove('connected');
+                statusDot.classList.add('disconnected');
+                statusText.textContent = 'Disconnected';
+            }
+        }
+
+        // Retry button
+        retryButton.addEventListener('click', () => {
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+            }
+            reconnectAttempts = 0;
+            connectWebSocket();
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            isStreaming = false;
+            if (ws) {
+                ws.close();
+            }
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        });
+
+        // Prevent screen from sleeping on mobile
+        if ('wakeLock' in navigator) {
+            let wakeLock = null;
+
+            const requestWakeLock = async () => {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    console.log('Wake lock acquired');
+                } catch (err) {
+                    console.log('Wake lock error:', err);
+                }
+            };
+
+            // Request wake lock when camera starts
+            startButton.addEventListener('click', requestWakeLock);
+        }
+    </script>
+</body>
+</html>

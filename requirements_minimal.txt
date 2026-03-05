@@ -1,0 +1,18 @@
+# Minimal requirements for quick start (person detection only)
+# Install full requirements.txt later for face recognition
+
+# Web Server
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+websockets==13.1
+python-multipart==0.0.12
+
+# Computer Vision & Object Detection
+ultralytics==8.3.0
+opencv-python==4.10.0.84
+numpy<2.0
+pillow==10.4.0
+
+# Performance
+torch==2.5.0
+torchvision==0.20.0
